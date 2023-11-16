@@ -9,7 +9,9 @@ import io.github.bucket4j.local.LocalBucket;
 import io.github.bucket4j.local.LocalBucketBuilder;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-import reisrijder.reisrijder.ReisRijderApplication;
+import reisrijder.reisrijder.exceptions.BadRequestException;
+import reisrijder.reisrijder.exceptions.NotFoundException;
+import reisrijder.reisrijder.exceptions.TooManyRequestsException;
 import reisrijder.reisrijder.model.AddressModel;
 import reisrijder.reisrijder.model.request.AddressAutoComplete;
 import reisrijder.reisrijder.model.request.AddressLocation;
@@ -19,9 +21,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-@CrossOrigin(origins = ReisRijderApplication.CROSS_ORIGIN)
+import static reisrijder.reisrijder.exceptions.ExceptionHandler.handleException;
+
 @RestController
-@RequestMapping("/api/address")
+@RequestMapping("/address")
 public class AddressController {
 
     // Cache the most relevant addresses
@@ -43,10 +46,10 @@ public class AddressController {
      * @apiNote 1 token per request
      */
     @PostMapping(value = "/autocomplete", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<AddressModel[]> getAddressFromText(@RequestBody AddressAutoComplete request) {
+    public AddressModel[] getAddressFromText(@RequestBody AddressAutoComplete request) {
         // Check rate limit
         if (!bucket.tryConsume(1)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+            throw new TooManyRequestsException("You have exceeded the api rate limit");
         }
 
         List<AddressModel> addresses = new ArrayList<>();
@@ -54,13 +57,13 @@ public class AddressController {
             // Get the address for auto-completion
             String lookupAddress = request.getAddress();
             if (lookupAddress == null) {
-                return ResponseEntity.badRequest().build();
+                throw new BadRequestException("Address is required");
             }
 
             // Check cached addresses
             AddressModel[] cachedAddresses = CACHE_AUTO_COMPLETE.getIfPresent(lookupAddress);
             if (cachedAddresses != null) {
-                return ResponseEntity.ok(cachedAddresses);
+                return cachedAddresses;
             }
 
             // Getting auto-completion suggestions from third party api
@@ -69,14 +72,14 @@ public class AddressController {
 
             // Checking if the response was successful
             if (response == null) {
-                return ResponseEntity.badRequest().build();
+                throw new BadRequestException("Address is invalid");
             }
 
             // Building the response for "/autocomplete" endpoint
             JsonNode payloadNode = NSApi.buildPayloadJson(response);
             if (payloadNode == null || payloadNode.get(0) == null) {
                 // Empty response
-                return ResponseEntity.badRequest().build();
+                throw new NotFoundException("No addresses found");
             }
 
             JsonNode locationsNode = payloadNode.get(0).get("locations");
@@ -93,9 +96,9 @@ public class AddressController {
             // Enter current list of addresses in the cache
             CACHE_AUTO_COMPLETE.put(lookupAddress, listToArray(addresses));
         } catch (Exception e) {
-            e.printStackTrace();
+            handleException(e);
         }
-        return ResponseEntity.ok(listToArray(addresses));
+        return listToArray(addresses);
     }
 
     /**
@@ -105,10 +108,10 @@ public class AddressController {
      * @apiNote 3 tokens per request
      */
     @PostMapping(value = "/location", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<AddressModel> getAddressFromCoords(@RequestBody AddressLocation request) {
+    public AddressModel getAddressFromCoords(@RequestBody AddressLocation request) {
         // Check rate limit
         if (!bucket.tryConsume(3)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+            throw new TooManyRequestsException("You have exceeded the api rate limit");
         }
 
         AddressModel address = null;
@@ -116,13 +119,14 @@ public class AddressController {
             // Get the location
             final double UNIQUE_VALUE = request.getUniqueValue();
             if (UNIQUE_VALUE == 0) {
-                return ResponseEntity.badRequest().build();
+                // When UNIQUE_VALUE is 0, latitude and longitude are both 0 and most likely not specified
+                throw new BadRequestException("Latitude and longitude are required");
             }
 
             // Check cached addresses
             AddressModel cachedAddresses = CACHE_LOCATION.getIfPresent(UNIQUE_VALUE);
             if (cachedAddresses != null) {
-                return ResponseEntity.ok(cachedAddresses);
+                return cachedAddresses;
             }
 
             double latitude = request.getLatitude();
@@ -134,13 +138,13 @@ public class AddressController {
 
             // Checking if the response was successful
             if (response == null) {
-                return ResponseEntity.badRequest().build();
+                throw new BadRequestException("Location or address is invalid");
             }
 
             JsonNode payloadNode = NSApi.buildPayloadJson(response);
             if (payloadNode == null || !payloadNode.has("name")) {
                 // Empty response
-                return ResponseEntity.badRequest().build();
+                throw new NotFoundException("No address found for this location");
             }
 
             String name = payloadNode.get("name").asText();
@@ -152,9 +156,9 @@ public class AddressController {
             // Enter current address in the cache
             CACHE_LOCATION.put(UNIQUE_VALUE, address);
         } catch (Exception e) {
-            e.printStackTrace();
+            handleException(e);
         }
-        return ResponseEntity.ok(address);
+        return address;
     }
 
     private AddressModel[] listToArray(List<AddressModel> list) {

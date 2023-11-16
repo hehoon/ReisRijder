@@ -5,11 +5,9 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Refill;
 import io.github.bucket4j.local.LocalBucket;
 import io.github.bucket4j.local.LocalBucketBuilder;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import reisrijder.reisrijder.ReisRijderApplication;
+import reisrijder.reisrijder.exceptions.TooManyRequestsException;
 import reisrijder.reisrijder.model.StationModel;
 import reisrijder.reisrijder.thirdparty.NSApi;
 
@@ -17,9 +15,8 @@ import java.time.Duration;
 import java.util.*;
 import java.util.function.UnaryOperator;
 
-@CrossOrigin(origins = ReisRijderApplication.CROSS_ORIGIN)
 @RestController
-@RequestMapping("/api/station")
+@RequestMapping("/station")
 public class StationController {
 
     private static final StationModel[] ALL_STATIONS = fetchStations();
@@ -33,9 +30,7 @@ public class StationController {
     }
 
     /**
-     * Gets all available stations
-     * @return An array of stations with their respective attributes
-     * @apiNote 4 tokens per request
+     * Fetch stations from the NS API
      */
     private static StationModel[] fetchStations() {
         // Map filter types to a UnaryOperator, which converts a raw string to a processed string
@@ -110,8 +105,13 @@ public class StationController {
         return list.toArray(new StationModel[0]);
     }
 
+    /**
+     * Gets all available stations
+     * @return An array of stations with their respective attributes
+     * @apiNote 4 tokens per request
+     */
     @GetMapping(value = "/nearby", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<StationModel[]> getStationsFromLocationWithParameters(
+    public StationModel[] getStationsFromLocationWithParameters(
             @RequestParam(name = "lat") double latitude,
             @RequestParam(name = "lon") double longitude,
             @RequestParam(name = "ovbike", required = false) boolean ovBike,
@@ -121,29 +121,25 @@ public class StationController {
     ) {
         // Check rate limit
         if (!bucket.tryConsume(4)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+            throw new TooManyRequestsException("You have exceeded the api rate limit");
         }
 
         List<StationModel> stations = new ArrayList<>();
-        try {
-            for (StationModel station : ALL_STATIONS) {
-                if (station.matchesParameters(ovBike, ovEbike, baggage)) {
-                    // Cloning the station isn't necessary in this case... so let's do it anyways! :/
-                    StationModel stationClone = station.clone();
-                    stationClone.setDistance(latitude, longitude);
-                    stations.add(stationClone);
-                }
+        for (StationModel station : ALL_STATIONS) {
+            if (station.matchesParameters(ovBike, ovEbike, baggage)) {
+                // Cloning the station isn't necessary in this case... so let's do it anyways! :/
+                StationModel stationClone = station.clone();
+                stationClone.setDistance(latitude, longitude);
+                stations.add(stationClone);
             }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
 
         // Sort stations from lowest to highest distance
         stations.sort(Comparator.comparingInt((StationModel::getDistanceMeters)));
 
         if (limit == null || limit <= 0) {
-            return ResponseEntity.ok(listToArray(stations));
+            return listToArray(stations);
         }
-        return ResponseEntity.ok(listToArray(stations.subList(0, Math.min(limit, stations.size()))));
+        return listToArray(stations.subList(0, Math.min(limit, stations.size())));
     }
 }

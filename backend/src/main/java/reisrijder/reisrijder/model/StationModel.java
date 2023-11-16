@@ -1,5 +1,9 @@
 package reisrijder.reisrijder.model;
 
+import reisrijder.reisrijder.exceptions.InternalServerErrorException;
+
+import static reisrijder.reisrijder.exceptions.ExceptionHandler.handleException;
+
 public class StationModel implements Cloneable {
     private String name;
     private double distance;
@@ -92,7 +96,8 @@ public class StationModel implements Cloneable {
         try {
             return (StationModel) super.clone();
         } catch (CloneNotSupportedException e) {
-            throw new AssertionError();
+            e.printStackTrace();
+            throw new InternalServerErrorException("Oops, something went wrong");
         }
     }
 }

@@ -10,8 +10,7 @@ import java.util.regex.Pattern;
 @SpringBootApplication
 public class ReisRijderApplication {
 
-	public static final String CROSS_ORIGIN = "http://localhost:8080";
-	public static final String OCP_APIM_SUBSCRIPTION_KEY = "ENTER-API-KEY-HERE";// TODO api key
+	public static final String OCP_APIM_SUBSCRIPTION_KEY = "ENTER-YOUR-API-KEY-HERE";
 
 	public static void main(String[] args) {
 		Locale.setDefault(Locale.ENGLISH);
